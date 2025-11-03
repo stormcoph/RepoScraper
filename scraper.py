@@ -61,7 +61,7 @@ def get_file_info(file_path):
         'lines': lines
     }
 
-def process_directory(directory_path, output_file_name, source_info):
+def process_directory(directory_path, output_file_name, source_info, script_to_exclude=None):
     """Walks through a directory, processes files, and writes to an output file."""
     print(f"Processing directory: {directory_path}")
     
@@ -80,6 +80,12 @@ def process_directory(directory_path, output_file_name, source_info):
         
         for file in files:
             file_path = os.path.join(root, file)
+            
+            # Exclude the script itself
+            if script_to_exclude and os.path.abspath(file_path) == script_to_exclude:
+                print(f"Skipping the script itself: {os.path.relpath(file_path, directory_path)}")
+                continue
+
             rel_path = os.path.relpath(file_path, directory_path)
             
             # Check if file is binary
@@ -214,8 +220,9 @@ def scrape_local_directory():
         print("Invalid choice. Please enter 1 or 2.")
         sys.exit(1)
         
+    script_to_exclude = os.path.abspath(__file__)
     folder_name = os.path.basename(directory_path)
-    process_directory(directory_path, folder_name, directory_path)
+    process_directory(directory_path, folder_name, directory_path, script_to_exclude)
 
 
 def main():
