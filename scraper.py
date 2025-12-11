@@ -10,134 +10,158 @@ import mimetypes
 import datetime
 
 def is_binary_file(file_path):
-    """Check if a file is binary based on its extension and content."""
-    # Check by extension first
     excluded_extensions = {
-        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp',  # Images
-        '.dll', '.exe', '.bin', '.so', '.dylib',  # Executables and binaries
-        '.onnx', '.tensorrt', '.pt', '.pth', '.h5', '.pb',  # ML models
-        '.zip', '.tar', '.gz', '.xz', '.7z', '.rar',  # Archives
-        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',  # Documents
-        '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac',  # Media
-        '.db', '.sqlite', '.dat'  # Data files
+        '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp',
+        '.dll', '.exe', '.bin', '.so', '.dylib',
+        '.onnx', '.tensorrt', '.pt', '.pth', '.h5', '.pb',
+        '.zip', '.tar', '.gz', '.xz', '.7z', '.rar',
+        '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+        '.mp3', '.mp4', '.avi', '.mov', '.wav', '.flac',
+        '.db', '.sqlite', '.dat', 'hex'
     }
-    
+
     if any(file_path.lower().endswith(ext) for ext in excluded_extensions):
         return True
-    
-    # Check by mime type
+
     mime, _ = mimetypes.guess_type(file_path)
     if mime is None:
-        # If mimetype can't be determined, read a small chunk and check for null bytes
         try:
             with open(file_path, 'rb') as f:
                 chunk = f.read(1024)
                 return b'\0' in chunk
         except:
-            return True  # If we can't read the file, consider it binary
-    
-    # Consider text-based mime types
-    text_mimes = ['text/', 'application/json', 'application/xml', 'application/javascript', 
-                 'application/x-python', 'application/x-ruby', 'application/x-php']
-    
+            return True
+
+    text_mimes = ['text/', 'application/json', 'application/xml', 'application/javascript',
+                  'application/x-python', 'application/x-ruby', 'application/x-php']
+
     return not any(text_type in mime for text_type in text_mimes)
 
+
 def get_file_info(file_path):
-    """Get additional file information."""
     stat = os.stat(file_path)
     size = stat.st_size
     modified = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Count lines safely
+
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = sum(1 for _ in f)
     except:
-        lines = "N/A"  # Unable to count lines
-    
+        lines = "N/A"
+
     return {
         'size': size,
         'modified': modified,
         'lines': lines
     }
 
+
+def ask_for_exclusions(valid_files):
+    if not valid_files:
+        return valid_files  # nothing to exclude
+
+    choice = input("\nDo you want to exclude any files? (y/n): ").strip().lower()
+    if choice != "y":
+        return valid_files
+
+    print("\nList of files (largest → smallest):\n")
+
+    # Sort by size descending
+    sorted_files = sorted(valid_files, key=lambda x: x['size'], reverse=True)
+
+    # Print list in the requested format
+    for idx, info in enumerate(sorted_files):
+        size_kb = info['size'] / 1024
+        size_str = f"{size_kb:.2f} KB"
+        print(f"[{idx}] {info['path']} {size_str}")
+
+    exclude_input = input(
+        "\nEnter numbers of files to exclude (space-separated), or press Enter for none:\n> "
+    ).strip()
+
+    if not exclude_input:
+        return sorted_files
+
+    try:
+        exclude_indices = {int(x) for x in exclude_input.split()}
+    except ValueError:
+        print("Invalid input. No exclusions applied.")
+        return sorted_files
+
+    filtered_list = [
+        f for idx, f in enumerate(sorted_files)
+        if idx not in exclude_indices
+    ]
+
+    print(f"\nExcluding {len(sorted_files) - len(filtered_list)} file(s).")
+    return filtered_list
+
+
 def process_directory(directory_path, output_file_name, source_info, script_to_exclude=None):
-    """Walks through a directory, processes files, and writes to an output file."""
     print(f"Processing directory: {directory_path}")
-    
+
     output_file_path = f"{output_file_name}_content.txt"
-    
-    # Set maximum file size to process (10 MB)
     MAX_FILE_SIZE = 10 * 1024 * 1024
-    
-    # Collect files
+
     print("Collecting files...")
-    file_info = []
+    valid_files = []
+
     for root, dirs, files in os.walk(directory_path):
-        # Skip .git directory
         if '.git' in dirs:
             dirs.remove('.git')
-        
+
         for file in files:
             file_path = os.path.join(root, file)
-            
-            # Exclude the script itself
+
             if script_to_exclude and os.path.abspath(file_path) == script_to_exclude:
                 print(f"Skipping the script itself: {os.path.relpath(file_path, directory_path)}")
                 continue
 
             rel_path = os.path.relpath(file_path, directory_path)
-            
-            # Check if file is binary
+
             if is_binary_file(file_path):
                 print(f"Skipping binary file: {rel_path}")
                 continue
-            
-            # Get file size
+
             try:
                 size = os.path.getsize(file_path)
                 if size > MAX_FILE_SIZE:
                     print(f"Skipping large file: {rel_path} ({size / 1024 / 1024:.2f} MB)")
                     continue
-                
-                file_info.append({
+
+                valid_files.append({
                     'path': rel_path,
                     'size': size
                 })
             except Exception as e:
                 print(f"Error accessing file {rel_path}: {str(e)}")
-    
-    # Sort file information by path
-    file_info.sort(key=lambda x: x['path'])
-    
-    # Process the repository and write to the output file
-    print(f"Writing content to {output_file_path}...")
+
+    # Exclusion step (only option A files)
+    valid_files = ask_for_exclusions(valid_files)
+
+    # Sort final file list alphabetically for output
+    valid_files.sort(key=lambda x: x['path'])
+
+    print(f"\nWriting content to {output_file_path}...")
     with open(output_file_path, 'w', encoding='utf-8') as output_file:
-        # Write header
         output_file.write(f"# Source: {source_info}\n")
         output_file.write(f"# Generated on: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-        
-        # Write table of contents
+
         output_file.write("## Table of Contents\n\n")
-        for i, info in enumerate(file_info, 1):
-            path = info['path']
+        for i, info in enumerate(valid_files, 1):
             size_kb = info['size'] / 1024
-            output_file.write(f"{i}. {path} ({size_kb:.2f} KB)\n")
-        
-        # Process each file
-        for info in file_info:
+            output_file.write(f"{i}. {info['path']} ({size_kb:.2f} KB)\n")
+
+        for info in valid_files:
             rel_path = info['path']
             file_path = os.path.join(directory_path, rel_path)
-            
+
             try:
-                # Get additional file info
                 additional_info = get_file_info(file_path)
-                
-                # Read file content
+
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-                
-                # Write file information and content to output file
+
                 output_file.write(f"\n\n{'='*80}\n")
                 output_file.write(f"File: {rel_path}\n")
                 output_file.write(f"Size: {additional_info['size'] / 1024:.2f} KB | ")
@@ -145,81 +169,77 @@ def process_directory(directory_path, output_file_name, source_info, script_to_e
                 output_file.write(f"Last Modified: {additional_info['modified']}\n")
                 output_file.write(f"{'='*80}\n\n")
                 output_file.write(content)
+
             except UnicodeDecodeError:
                 output_file.write(f"\n\n{'='*80}\n")
                 output_file.write(f"File: {rel_path}\n")
                 output_file.write(f"{'='*80}\n\n")
-                output_file.write("Binary file or non-UTF-8 encoded text file, skipped.\n")
+                output_file.write("Binary or invalid text encoding - skipped.\n")
             except Exception as e:
                 output_file.write(f"\n\n{'='*80}\n")
                 output_file.write(f"File: {rel_path}\n")
                 output_file.write(f"{'='*80}\n\n")
                 output_file.write(f"Error reading file: {str(e)}\n")
-    
+
     print(f"Content has been successfully saved to {output_file_path}")
 
+
 def scrape_git_repository():
-    """Handles the logic for scraping a Git repository."""
     repo_url = input("Enter the GitHub repository URL: ")
-    
-    # Convert github.com URLs to git format if needed
+
     if 'github.com' in repo_url and not repo_url.endswith('.git'):
         repo_url = repo_url + '.git'
-    
-    # Validate GitHub URL
+
     if not re.match(r'https?://github\.com/[^/]+/[^/]+/?.*', repo_url):
         print("Error: Invalid GitHub repository URL")
         sys.exit(1)
-    
-    # Extract repository name from URL for output file naming
+
     repo_name = repo_url.split('/')[-1]
     if repo_name.endswith('.git'):
         repo_name = repo_name[:-4]
-    
-    # Create a temporary directory to clone the repository
+
     temp_dir = tempfile.mkdtemp()
     print(f"Using temporary directory: {temp_dir}")
-    
+
     try:
-        # Clone the repository
         print(f"Cloning repository {repo_url}...")
         try:
-            result = subprocess.run(['git', 'clone', repo_url, temp_dir], 
-                                   stderr=subprocess.PIPE, stdout=subprocess.PIPE, 
-                                   universal_newlines=True)
+            result = subprocess.run(
+                ['git', 'clone', repo_url, temp_dir],
+                stderr=subprocess.PIPE, stdout=subprocess.PIPE,
+                universal_newlines=True
+            )
             if result.returncode != 0:
                 print(f"Error cloning repository: {result.stderr}")
                 sys.exit(1)
         except Exception as e:
             print(f"Failed to execute git clone: {str(e)}")
             sys.exit(1)
-        
+
         process_directory(temp_dir, repo_name, repo_url)
-    
+
     finally:
-        # Clean up: remove the temporary directory
         print(f"Cleaning up temporary directory: {temp_dir}")
         shutil.rmtree(temp_dir)
 
+
 def scrape_local_directory():
-    """Handles the logic for scraping a local directory."""
     print("\nSelect the local directory option:")
     print("1. Scrape current folder")
     print("2. Scrape a specified folder")
     local_choice = input("Enter your choice (1 or 2): ")
 
-    directory_path = ""
     if local_choice == '1':
         directory_path = os.getcwd()
     elif local_choice == '2':
-        directory_path = input("Enter the path to the directory: ")
+        directory_path = input("Enter the path to the directory: ").strip()
         if not os.path.isdir(directory_path):
             print("Error: Invalid directory path.")
             sys.exit(1)
     else:
         print("Invalid choice. Please enter 1 or 2.")
         sys.exit(1)
-        
+
     script_to_exclude = os.path.abspath(__file__)
     folder_name = os.path.basename(directory_path)
     process_directory(directory_path, folder_name, directory_path, script_to_exclude)
@@ -238,6 +258,7 @@ def main():
     else:
         print("Invalid choice. Please enter 1 or 2.")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
